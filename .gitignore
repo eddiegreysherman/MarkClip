@@ -1,0 +1,27 @@
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Linter cache
+.ruff_cache/
+
+# Desktop entries (system-specific)
+*.desktop
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Lock files (optional - uncomment if you don't want uv.lock in repo)
+# uv.lock
