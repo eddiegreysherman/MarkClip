@@ -18,7 +18,9 @@ import mistune
 class MarkClip(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.markdown = mistune.create_markdown(plugins=["table", "strikethrough"])
+        self.markdown = mistune.create_markdown(
+            hard_wrap=True, plugins=["table", "strikethrough"]
+        )
         self.init_ui()
         self.init_dark_theme()
 
