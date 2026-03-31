@@ -19,7 +19,7 @@ directly into your document or email.
 
 ## Screenshot
 
-![MarkClip](Screenshot.png)
+![MarkClip](screenshot_new.png)
 
 ## Installation
 
