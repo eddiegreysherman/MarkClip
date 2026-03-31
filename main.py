@@ -11,8 +11,63 @@ from PyQt6.QtWidgets import (
     QSplitter,
 )
 from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSlot
-from PyQt6.QtGui import QPalette, QColor, QGuiApplication, QIcon
+from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSlot, QRegularExpression
+from PyQt6.QtGui import (
+    QPalette,
+    QColor,
+    QGuiApplication,
+    QIcon,
+    QSyntaxHighlighter,
+    QTextCharFormat,
+    QFont,
+)
 import mistune
+
+
+class MarkdownHighlighter(QSyntaxHighlighter):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._highlighting_rules = []
+
+        header_fmt = QTextCharFormat()
+        header_fmt.setForeground(QColor("#7CB9E8"))
+        header_fmt.setFontWeight(QFont.Weight.Bold)
+        self._highlighting_rules.append(
+            (QRegularExpression(r"^#{1,6}\s.+"), header_fmt)
+        )
+
+        bold_fmt = QTextCharFormat()
+        bold_fmt.setForeground(QColor("#FFEB3B"))
+        bold_fmt.setFontWeight(QFont.Weight.Bold)
+        self._highlighting_rules.append((QRegularExpression(r"\*\*.+?\*\*"), bold_fmt))
+        self._highlighting_rules.append((QRegularExpression(r"__.+?__"), bold_fmt))
+
+        italic_fmt = QTextCharFormat()
+        italic_fmt.setForeground(QColor("#E1BEE7"))
+        self._highlighting_rules.append(
+            (QRegularExpression(r"(?<!\*)\*[^*]+\*(?!\*)"), italic_fmt)
+        )
+        self._highlighting_rules.append(
+            (QRegularExpression(r"(?<!_)_[^_]+_(?!_)"), italic_fmt)
+        )
+
+        blockquote_fmt = QTextCharFormat()
+        blockquote_fmt.setForeground(QColor("#90EE90"))
+        self._highlighting_rules.append((QRegularExpression(r"^>\s.+"), blockquote_fmt))
+
+        bullet_fmt = QTextCharFormat()
+        bullet_fmt.setForeground(QColor("#FF9800"))
+        self._highlighting_rules.append(
+            (QRegularExpression(r"^[\-\*]\s.+"), bullet_fmt)
+        )
+
+    def highlightBlock(self, text):
+        for pattern, fmt in self._highlighting_rules:
+            match = pattern.match(text)
+            while match.hasMatch():
+                length = match.capturedLength()
+                self.setFormat(match.capturedStart(), length, fmt)
+                match = pattern.match(text, match.capturedEnd())
 
 
 class MarkClip(QMainWindow):
@@ -60,6 +115,7 @@ class MarkClip(QMainWindow):
                 color: #6a6a6a;
             }
         """)
+        self.highlighter = MarkdownHighlighter(self.editor.document())
 
         self.preview = QTextEdit()
         self.preview.setReadOnly(True)
@@ -235,43 +291,50 @@ class MarkClip(QMainWindow):
 
         html = html_content
 
-        html = re.sub(r'font-family:[^;"]*;?', "", html)
-        html = re.sub(r"line-height:\d+(\.\d+)?;?", "", html)
-        html = re.sub(r"font-size:\d+(\.\d+)?(px|pt|em|%)?;?", "", html)
-
-        html = re.sub(r"color:\s*#1e1e1e;?", "#000000", html)
-        html = re.sub(r"color:\s*#d4d4d4;?", "#000000", html)
-        html = re.sub(r"color:\s*#ffffff;?", "#000000", html)
-        html = re.sub(r"color:\s*#9a9a9a;?", "#444444", html)
-
-        html = re.sub(r'(<code[^>]*)style="[^"]*"', r"\1", html)
-        html = re.sub(r"(<code[^>]*)background-color:\s*#1e1e1e;?", r"\1", html)
-
+        html = re.sub(r"<!DOCTYPE html[^>]*>", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"<html[^>]*>", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"</html>", "", html, flags=re.IGNORECASE)
         html = re.sub(
-            r'(<span[^>]*style="[^"]*)color:\s*#569cd6;?', r"\1color: #0066cc;", html
+            r"<head[^>]*>.*?</head>", "", html, flags=re.DOTALL | re.IGNORECASE
         )
+        html = re.sub(r"<body[^>]*>", "", html, flags=re.IGNORECASE)
+        html = re.sub(r"</body>", "", html, flags=re.IGNORECASE)
         html = re.sub(
-            r'(<a[^>]*style="[^"]*)color:\s*#569cd6;?', r"\1color: #0066cc;", html
+            r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL | re.IGNORECASE
         )
 
-        html = re.sub(r"-qt-list-indent:\s*\d+;?\s*", "", html)
-        html = re.sub(r"-qt-block-indent:\s*\d+;?\s*", "", html)
-        html = re.sub(r"text-indent:\s*0px;?\s*", "", html)
-
         html = re.sub(
-            r'(<ul[^>]*style=")([^"]*)margin-left:\s*0px;?',
-            r"\1\2margin-left: 24px;",
+            r"<span[^>]*font-weight:\s*(?:bold|700)[^>]*font-style:\s*italic[^>]*>(.*?)</span>",
+            r"<strong><em>\1</em></strong>",
             html,
+            flags=re.DOTALL,
         )
         html = re.sub(
-            r'(<ol[^>]*style=")([^"]*)margin-left:\s*0px;?',
-            r"\1\2margin-left: 24px;",
+            r"<span[^>]*font-style:\s*italic[^>]*font-weight:\s*(?:bold|700)[^>]*>(.*?)</span>",
+            r"<strong><em>\1</em></strong>",
             html,
+            flags=re.DOTALL,
+        )
+        html = re.sub(
+            r"<span[^>]*font-weight:\s*(?:bold|700)[^>]*>(.*?)</span>",
+            r"<strong>\1</strong>",
+            html,
+            flags=re.DOTALL,
+        )
+        html = re.sub(
+            r"<span[^>]*font-style:\s*italic[^>]*>(.*?)</span>",
+            r"<em>\1</em>",
+            html,
+            flags=re.DOTALL,
+        )
+        html = re.sub(
+            r"<span[^>]*text-decoration:\s*line-through[^>]*>(.*?)</span>",
+            r"<del>\1</del>",
+            html,
+            flags=re.DOTALL,
         )
 
-        html = re.sub(
-            r'(<li[^>]*style=")([^"]*)margin-left:\s*\d+px;?\s*', r"\1\2", html
-        )
+        html = re.sub(r'\s*style="[^"]*"', "", html)
 
         return html
 
