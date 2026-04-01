@@ -1,3 +1,5 @@
+![MarkClip](icon-final.png)
+
 # MarkClip
 
 A Markdown editor that gets out of your way and lets you write, preview, and
