@@ -10,7 +10,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSplitter,
 )
-from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSlot
 from PyQt6.QtCore import Qt, QTimer, QMimeData, pyqtSlot, QRegularExpression
 from PyQt6.QtGui import (
     QPalette,
@@ -70,6 +69,185 @@ class MarkdownHighlighter(QSyntaxHighlighter):
                 match = pattern.match(text, match.capturedEnd())
 
 
+class MarkdownEditor(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        import re
+
+        self._re = re
+
+    def keyPressEvent(self, e):
+        key = e.key()
+        modifiers = e.modifiers()
+
+        if key == Qt.Key.Key_Return and not (
+            modifiers & Qt.KeyboardModifier.ShiftModifier
+        ):
+            if self._handle_list_enter():
+                return
+        elif key == Qt.Key.Key_Backspace:
+            if self._handle_list_backspace():
+                return
+        elif key == Qt.Key.Key_Tab:
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                if self._handle_list_dedent():
+                    return
+            else:
+                if self._handle_list_indent():
+                    return
+
+        super().keyPressEvent(e)
+
+    def _get_current_line(self):
+        cursor = self.textCursor()
+        cursor.select(cursor.SelectionType.LineUnderCursor)
+        return cursor.selectedText()
+
+    def _get_line_before_cursor(self):
+        cursor = self.textCursor()
+        text = cursor.block().text()
+        col = cursor.columnNumber()
+        return text[:col]
+
+    def _is_list_item(self, line):
+        re = self._re
+        bullet_match = re.match(r"^(\s*)([-*+])\s+(.+)$", line)
+        if bullet_match:
+            return ("bullet", bullet_match.group(1), bullet_match.group(2), None, True)
+
+        bullet_empty_match = re.match(r"^(\s*)([-*+])\s*$", line)
+        if bullet_empty_match:
+            return (
+                "bullet",
+                bullet_empty_match.group(1),
+                bullet_empty_match.group(2),
+                None,
+                False,
+            )
+
+        ordered_match = re.match(r"^(\s*)(\d+)\.\s+(.+)$", line)
+        if ordered_match:
+            return (
+                "ordered",
+                ordered_match.group(1),
+                None,
+                int(ordered_match.group(2)),
+                True,
+            )
+
+        ordered_empty_match = re.match(r"^(\s*)(\d+)\.\s*$", line)
+        if ordered_empty_match:
+            return (
+                "ordered",
+                ordered_empty_match.group(1),
+                None,
+                int(ordered_empty_match.group(2)),
+                False,
+            )
+
+        return None
+
+    def _handle_list_enter(self):
+        cursor = self.textCursor()
+        line = self._get_current_line()
+        list_info = self._is_list_item(line)
+
+        if not list_info:
+            return False
+
+        list_type, indent, marker, number, has_content = list_info
+
+        if not has_content:
+            cursor.select(cursor.SelectionType.LineUnderCursor)
+            cursor.removeSelectedText()
+            cursor.insertText("\n")
+            return True
+
+        if list_type == "bullet":
+            next_marker = marker
+            next_item = f"{indent}{next_marker} "
+        else:
+            next_number = number + 1
+            next_item = f"{indent}{next_number}. "
+
+        cursor.movePosition(cursor.MoveOperation.EndOfLine)
+        cursor.insertText(f"\n{next_item}")
+        return True
+
+    def _handle_list_backspace(self):
+        cursor = self.textCursor()
+        line = self._get_current_line()
+        col = cursor.columnNumber()
+        list_info = self._is_list_item(line)
+
+        if not list_info:
+            return False
+
+        list_type, indent, marker, number, has_content = list_info
+
+        if list_type == "bullet":
+            prefix = f"{indent}{marker} "
+        else:
+            prefix = f"{indent}{number}. "
+
+        if col <= len(prefix) and not has_content:
+            cursor.select(cursor.SelectionType.LineUnderCursor)
+            cursor.removeSelectedText()
+            return True
+
+        if col <= len(prefix) and has_content:
+            new_line = line[len(prefix) :]
+            cursor.select(cursor.SelectionType.LineUnderCursor)
+            cursor.insertText(new_line)
+            return True
+
+        return False
+
+    def _handle_list_indent(self):
+        cursor = self.textCursor()
+        line = self._get_current_line()
+        list_info = self._is_list_item(line)
+
+        if not list_info:
+            return False
+
+        list_type, indent, marker, number, has_content = list_info
+        new_indent = indent + "  "
+
+        if list_type == "bullet":
+            new_line = f"{new_indent}{marker} {line.lstrip()[2:]}"
+        else:
+            new_line = f"{new_indent}{number}. {line.lstrip()[len(str(number)) + 2 :]}"
+
+        cursor.select(cursor.SelectionType.LineUnderCursor)
+        cursor.insertText(new_line)
+        return True
+
+    def _handle_list_dedent(self):
+        cursor = self.textCursor()
+        line = self._get_current_line()
+        list_info = self._is_list_item(line)
+
+        if not list_info:
+            return False
+
+        list_type, indent, marker, number, has_content = list_info
+
+        if len(indent) < 2:
+            return False
+
+        new_indent = indent[2:]
+
+        if list_type == "bullet":
+            new_line = f"{new_indent}{marker} {line.lstrip()[2:]}"
+        else:
+            new_line = f"{new_indent}{number}. {line.lstrip()[len(str(number)) + 2 :]}"
+
+        cursor.select(cursor.SelectionType.LineUnderCursor)
+        cursor.insertText(new_line)
+        return True
+
+
 class MarkClip(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -98,7 +276,7 @@ class MarkClip(QMainWindow):
             }
         """)
 
-        self.editor = QTextEdit()
+        self.editor = MarkdownEditor()
         self.editor.setPlaceholderText("Write your markdown here...")
         self.editor.textChanged.connect(self.on_text_changed)
         self.editor.setStyleSheet("""
